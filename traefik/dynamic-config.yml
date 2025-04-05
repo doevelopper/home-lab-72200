@@ -1,0 +1,8 @@
+tls:
+  certificates:
+    - certFile: /certs/ollama.local.crt
+      keyFile: /certs/ollama.local.key
+    - certFile: /certs/whoami.local.crt
+      keyFile: /certs/whoami.local.key
+    - certFile: /certs/static.local.crt
+      keyFile: /certs/static.local.key

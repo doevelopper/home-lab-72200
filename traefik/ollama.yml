@@ -1,0 +1,19 @@
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: home-lab-ollama
+    networks:
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ollama.rule=Host(`ollama.local`)"
+      - "traefik.http.routers.ollama.entrypoints=websecure"
+      - "traefik.http.services.ollama.loadbalancer.server.port=11434"
+      - "traefik.http.routers.ollama.tls=true"
+    volumes:
+      - ./ollama/data:/root/.ollama  # Persists Ollama data
+    restart: unless-stopped
+
+networks:
+  backend:
+    external: true  # Assumes the backend network already exists

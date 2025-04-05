@@ -1,0 +1,125 @@
+version: '3.8'
+
+# Define networks for service isolation
+networks:
+  frontend:
+    driver: bridge
+    internal: false # Public-facing network
+  backend:
+    driver: bridge
+    internal: true # Internal-only network
+
+# Services
+services:
+  # Nginx: Public-facing reverse proxy with local SSL certificates
+  nginx:
+    image: nginx:latest
+    container_name: home-lab-nginx
+    ports:
+      - "8081:80"   # HTTP (mapped to host port 8081)
+      - "8443:443"  # HTTPS (mapped to host port 8443)
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro           # Nginx configuration
+      - ./static-content:/usr/share/nginx/html:ro     # Static content
+      - ./nginx/certs:/etc/nginx/certs:ro             # Local SSL certificates
+    networks:
+      - frontend
+    depends_on:
+      - traefik
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"  # Ensure watchtower does not monitor this container
+
+  # Traefik: Internal gateway with local SSL certificates
+  traefik:
+    image: traefik:${TRAEFIK_DOCKER_TAG:-v3.3.5}
+    container_name: home-lab-traefik
+    mem_limit: ${TRAEFIK_MEM_LIMIT:-200m}
+    command:
+      - --api.insecure=${TRAEFIK_API_INSECURE:-true} # Enable Traefik dashboard (for local use only)
+      - --api.dashboard=${TRAEFIK_DASHBOARD_ENABLE:-true}
+      - --log.level=${TRAEFIK_LOG_LEVEL:-ERROR}
+      - --accesslog=${TRAEFIK_ACCESSLOG:-false}
+      - --entryPoints.metrics.address=:8082
+      - --metrics.prometheus.entryPoint=metrics
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--serversTransport.insecureSkipVerify=true"  # Skip certificate validation for internal services
+      - "--providers.file.filename=/dynamic-config.yml"
+      # - "--certificatesresolvers.localcert.acme.storage=/letsencrypt/acme.json"
+      # - "--certificatesresolvers.localcert.acme.email=your-email@example.com"
+      # - "--certificatesresolvers.localcert.acme.tlschallenge=true"
+    ports:
+      - "8080:8080"  # Traefik dashboard (local use only)
+      - "80:80"      # HTTP (mapped to host port 80)
+      - "443:443"    # HTTPS (mapped to host port 443)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Access Docker socket
+      - ./traefik/certs:/certs:ro                     # Local SSL certificates
+      - ./traefik/dynamic-config.yml:/dynamic-config.yml:ro
+      - ./traefik/letsencrypt:/letsencrypt            # Let's Encrypt storage
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"  # Ensure watchtower does not monitor this container
+
+  # Sample Microservice: Who Am I
+  whoami:
+    image: traefik/whoami
+    container_name: home-lab-whoami
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.local`)"
+      - "traefik.http.routers.whoami.entrypoints=websecure"
+      - "traefik.http.services.whoami.loadbalancer.server.port=80"
+      - "traefik.http.routers.whoami.tls=true"
+
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # Optional: Static Content Hosting
+  static-content:
+    image: nginx:latest
+    container_name: home-lab-static-content
+    volumes:
+      - ./static-content:/usr/share/nginx/html:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.static.rule=Host(`static.local`)"
+      - "traefik.http.routers.static.entrypoints=websecure"
+      - "traefik.http.services.static.loadbalancer.server.port=80"
+      - "traefik.http.routers.static.tls=true"
+
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # # Optional: Monitoring Tools
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: home-lab-prometheus
+  #   volumes:
+  #     - ./prometheus/config:/etc/prometheus:ro
+  #     - ./prometheus/data:/prometheus
+  #   command:
+  #     - "--config.file=/etc/prometheus/prometheus.yml"
+  #   networks:
+  #     - backend
+  #   restart: unless-stopped
+
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: home-lab-grafana
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=adminpassword
+  #   volumes:
+  #     - ./grafana/data:/var/lib/grafana
+  #   ports:
+  #     - "3001:3000"  # Grafana UI (mapped to host port 3001)
+  #   networks:
+  #     - backend
+  #   restart: unless-stopped
