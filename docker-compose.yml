@@ -1,125 +1,279 @@
-version: '3.8'
+# version: '3.8'
+
+# Environment variables that can be overridden in .env file
+# TRAEFIK_DOCKER_TAG=v3.3.5
+# TRAEFIK_MEM_LIMIT=200m
+# TRAEFIK_API_INSECURE=true
+# TRAEFIK_DASHBOARD_ENABLE=true
+# TRAEFIK_LOG_LEVEL=ERROR
+# TRAEFIK_ACCESSLOG=false
+# LOCAL_DOMAIN=local
+# ADMIN_EMAIL=your-email@example.com
 
 # Define networks for service isolation
 networks:
   frontend:
     driver: bridge
-    internal: false # Public-facing network
+    internal: false  # Public-facing network
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
   backend:
     driver: bridge
-    internal: true # Internal-only network
+    internal: true   # Internal-only network
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+  monitoring:
+    driver: bridge   # Network for monitoring services
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
 
-# Services
+# Volume definitions for persistent data storage
+volumes:
+  traefik-ssl:       # Persistent volume for SSL certificates
+  prometheus-data:   # For monitoring data retention
+  grafana-data:      # For Grafana dashboards and settings
+  portainer-data:    # For Portainer persistent data
+
+# Services configuration
 services:
-  # Nginx: Public-facing reverse proxy with local SSL certificates
-  nginx:
-    image: nginx:latest
-    container_name: home-lab-nginx
-    ports:
-      - "8081:80"   # HTTP (mapped to host port 8081)
-      - "8443:443"  # HTTPS (mapped to host port 8443)
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro           # Nginx configuration
-      - ./static-content:/usr/share/nginx/html:ro     # Static content
-      - ./nginx/certs:/etc/nginx/certs:ro             # Local SSL certificates
-    networks:
-      - frontend
-    depends_on:
-      - traefik
-    restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=false"  # Ensure watchtower does not monitor this container
-
-  # Traefik: Internal gateway with local SSL certificates
+  # Traefik: Edge router and load balancer
   traefik:
     image: traefik:${TRAEFIK_DOCKER_TAG:-v3.3.5}
     container_name: home-lab-traefik
     mem_limit: ${TRAEFIK_MEM_LIMIT:-200m}
+    security_opt:
+      - no-new-privileges:true
     command:
-      - --api.insecure=${TRAEFIK_API_INSECURE:-true} # Enable Traefik dashboard (for local use only)
       - --api.dashboard=${TRAEFIK_DASHBOARD_ENABLE:-true}
+      - --api.insecure=${TRAEFIK_API_INSECURE:-false}  # Secure by default
       - --log.level=${TRAEFIK_LOG_LEVEL:-ERROR}
-      - --accesslog=${TRAEFIK_ACCESSLOG:-false}
+      - --accesslog=${TRAEFIK_ACCESSLOG:-true}
+      - --accesslog.format=json
+      - --entryPoints.web.address=:80
+      - --entryPoints.websecure.address=:443
       - --entryPoints.metrics.address=:8082
       - --metrics.prometheus.entryPoint=metrics
-      - "--providers.docker=true"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--serversTransport.insecureSkipVerify=true"  # Skip certificate validation for internal services
-      - "--providers.file.filename=/dynamic-config.yml"
-      # - "--certificatesresolvers.localcert.acme.storage=/letsencrypt/acme.json"
-      # - "--certificatesresolvers.localcert.acme.email=your-email@example.com"
-      # - "--certificatesresolvers.localcert.acme.tlschallenge=true"
+      - --metrics.prometheus.addServicesLabels=true
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --serversTransport.insecureSkipVerify=true
+      - --certificatesresolvers.localcert.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.localcert.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --certificatesresolvers.localcert.acme.email=${ADMIN_EMAIL:-your-email@example.com}
+      - --certificatesresolvers.localcert.acme.tlschallenge=true
     ports:
-      - "8080:8080"  # Traefik dashboard (local use only)
-      - "80:80"      # HTTP (mapped to host port 80)
-      - "443:443"    # HTTPS (mapped to host port 443)
+      - "80:80"      # HTTP 
+      - "443:443"    # HTTPS
+      - "8082:8082"  # Metrics endpoint (internal)
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # Access Docker socket
-      - ./traefik/certs:/certs:ro                     # Local SSL certificates
-      - ./traefik/dynamic-config.yml:/dynamic-config.yml:ro
-      - ./traefik/letsencrypt:/letsencrypt            # Let's Encrypt storage
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik-ssl:/letsencrypt
+      - ./traefik/certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost:8082/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - frontend
       - backend
+      - monitoring
     restart: unless-stopped
     labels:
-      - "com.centurylinklabs.watchtower.enable=false"  # Ensure watchtower does not monitor this container
+      - "traefik.enable=true"
+      # Dashboard
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${LOCAL_DOMAIN:-local}`)"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
+      - "traefik.http.routers.traefik-dashboard.tls=true"
+      - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth"
+      # Auth middleware for dashboard
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=admin:$$apr1$$89oeud9t$$z5YhSdBn.mAifIkbFRSQO0"  # admin:password (change this!)
+      # Global middlewares
+      - "traefik.http.middlewares.secure-headers.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.secure-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.secure-headers.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.secure-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.secure-headers.headers.stsSeconds=31536000"
+      # HTTP to HTTPS redirect 
+      # - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
+      # - "traefik.http.routers.http-catchall.entrypoints=web"
+      # - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      # - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "com.centurylinklabs.watchtower.enable=false"
+
+  # Reverse proxy for legacy/specific applications
+  nginx:
+    image: nginx:stable-alpine
+    container_name: home-lab-nginx
+    ports:
+      - "8081:80"    # HTTP (mapped to host port 8081)
+      - "8443:443"   # HTTPS (mapped to host port 8443)
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs:ro    
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./static-content:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      - traefik
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nginx.rule=Host(`nginx.${LOCAL_DOMAIN:-local}`)"
+      - "traefik.http.routers.nginx.entrypoints=web"
+      - "traefik.http.services.nginx.loadbalancer.server.port=80"
+      - "traefik.http.routers.nginx.tls=true"
+      - "traefik.http.routers.nginx.middlewares=secure-headers"
+      - "com.centurylinklabs.watchtower.enable=false"
 
   # Sample Microservice: Who Am I
   whoami:
     image: traefik/whoami
     container_name: home-lab-whoami
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`whoami.local`)"
-      - "traefik.http.routers.whoami.entrypoints=websecure"
-      - "traefik.http.services.whoami.loadbalancer.server.port=80"
-      - "traefik.http.routers.whoami.tls=true"
-
+    security_opt:
+      - no-new-privileges:true
     networks:
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.${LOCAL_DOMAIN:-local}`)"
+      - "traefik.http.routers.whoami.entrypoints=web"
+      - "traefik.http.services.whoami.loadbalancer.server.port=80"
+      - "traefik.http.routers.whoami.tls=true"
+      - "traefik.http.routers.whoami.middlewares=secure-headers"
 
-  # Optional: Static Content Hosting
+  # Static Content Hosting
   static-content:
-    image: nginx:latest
+    image: nginx:stable-alpine
     container_name: home-lab-static-content
     volumes:
       - ./static-content:/usr/share/nginx/html:ro
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.static.rule=Host(`static.local`)"
-      - "traefik.http.routers.static.entrypoints=websecure"
-      - "traefik.http.services.static.loadbalancer.server.port=80"
-      - "traefik.http.routers.static.tls=true"
-
     networks:
       - backend
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.static.rule=Host(`static.${LOCAL_DOMAIN:-local}`)"
+      - "traefik.http.routers.static.entrypoints=web"
+      - "traefik.http.services.static.loadbalancer.server.port=80"
+      - "traefik.http.routers.static.tls=true"
+      - "traefik.http.routers.static.middlewares=secure-headers"
 
-  # # Optional: Monitoring Tools
-  # prometheus:
-  #   image: prom/prometheus:latest
-  #   container_name: home-lab-prometheus
-  #   volumes:
-  #     - ./prometheus/config:/etc/prometheus:ro
-  #     - ./prometheus/data:/prometheus
-  #   command:
-  #     - "--config.file=/etc/prometheus/prometheus.yml"
-  #   networks:
-  #     - backend
-  #   restart: unless-stopped
+  # Portainer: Container management UI
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: home-lab-portainer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer-data:/data
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.${LOCAL_DOMAIN:-local}`)"
+      - "traefik.http.routers.portainer.entrypoints=web"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+      - "traefik.http.routers.portainer.tls=true"
+      - "traefik.http.routers.portainer.middlewares=secure-headers"
 
-  # grafana:
-  #   image: grafana/grafana:latest
-  #   container_name: home-lab-grafana
-  #   environment:
-  #     - GF_SECURITY_ADMIN_PASSWORD=adminpassword
-  #   volumes:
-  #     - ./grafana/data:/var/lib/grafana
-  #   ports:
-  #     - "3001:3000"  # Grafana UI (mapped to host port 3001)
-  #   networks:
-  #     - backend
-  #   restart: unless-stopped
+  # Prometheus: Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: home-lab-prometheus
+    user: "65534:65534"  # nobody:nogroup
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    networks:
+      - monitoring
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${LOCAL_DOMAIN:-local}`)"
+      - "traefik.http.routers.prometheus.entrypoints=web"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus.tls=true"
+      - "traefik.http.routers.prometheus.middlewares=secure-headers,traefik-auth"
+
+  # Grafana: Metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: home-lab-grafana
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=securepassword  # Change this!
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=grafana.${LOCAL_DOMAIN:-local}
+    networks:
+      - monitoring
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${LOCAL_DOMAIN:-local}`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.routers.grafana.middlewares=secure-headers"
+
+  # Watchtower: Automatic container updates
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: home-lab-watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_SCHEDULE=0 0 4 * * *  # Run at 4:00 AM
+      - WATCHTOWER_NOTIFICATION_REPORT=true
+      - WATCHTOWER_NOTIFICATIONS=email
+      - WATCHTOWER_NOTIFICATION_EMAIL_FROM=${ADMIN_EMAIL:-your-email@example.com}
+      - WATCHTOWER_NOTIFICATION_EMAIL_TO=${ADMIN_EMAIL:-your-email@example.com}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER=smtp.example.com
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT=587
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_USER=user
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD=password
+    networks:
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"

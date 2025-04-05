@@ -6,3 +6,5 @@ tls:
       keyFile: /certs/whoami.local.key
     - certFile: /certs/static.local.crt
       keyFile: /certs/static.local.key
+    - certFile: /certs/local.crt
+      keyFile: /certs/local.key
