@@ -169,9 +169,11 @@ services:
     ports:
       - "8081:80"
     volumes:
-      - "/home/hroland/developpements/homelab/home-lab-72200/deployment/nginx/conf.d:/etc/nginx/conf.d"
+      - ./deployment/nginx:/etc/nginx
+      # - ./deployment/nginx/conf.d:/etc/nginx/conf.d
+      # - "/home/hroland/developpements/homelab/home-lab-72200/deployment/nginx/conf.d:/etc/nginx/conf.d"
       # Add a health-check file for Nginx
-      - ./nginx-health-check.conf:/etc/nginx/conf.d/health-check.conf
+      # - ./nginx-health-check.conf:/etc/nginx/conf.d/health-check.conf
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.nginx-http.entrypoints=web"
@@ -201,7 +203,7 @@ services:
       - homelab-network
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
-    command: --interval 3600 --cleanup --include-stopped --include-volumes
+    command: --interval 3600 --cleanup --include-stopped #--include-volumes
     environment:
       - WATCHTOWER_DEBUG=true
     labels:
@@ -212,3 +214,86 @@ services:
     #   timeout: 10s
     #   retries: 3
     #   start_period: 30s
+
+  # --- YouTrack Issue Tracker ---
+  youtrack-postgres:
+    image: postgres:17.4
+    container_name: youtrack-postgres-${YOUTRACK_CONTAINER_NAME:-aistack}
+    restart: unless-stopped
+    depends_on:
+      - dns
+    dns:
+      - 192.168.10.2
+    environment:
+      POSTGRES_USER: youtrack
+      POSTGRES_PASSWORD: youtrack
+      POSTGRES_DB: youtrack
+    volumes:
+      - youtrack-postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U youtrack"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  youtrack:
+    image: jetbrains/youtrack:2025.1.71685
+    container_name: youtrack-${YOUTRACK_CONTAINER_NAME:-aistack}
+    restart: unless-stopped
+    depends_on:
+      - youtrack-postgres
+      - dns
+    dns:
+      - 192.168.10.2
+    environment:
+      YT_DATABASE_URL: jdbc:postgresql://youtrack-postgres-aistack:5432/youtrack
+      YT_DATABASE_USER: youtrack
+      YT_DATABASE_PASSWORD: youtrack
+      # Add base URL for proper proxy configuration
+      YOUTRACK_BASEURL: http://youtrack.docker.local
+    volumes:
+      - youtrack-data:/opt/youtrack/data
+      - youtrack-conf:/opt/youtrack/conf
+      - youtrack-logs:/opt/youtrack/logs
+      - youtrack-backups:/opt/youtrack/backups
+    networks:
+      - frontend-network
+      - backend-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.youtrack.entrypoints=web"
+      - "traefik.http.routers.youtrack.rule=Host(`youtrack.docker.local`)"
+      - "traefik.http.services.youtrack.loadbalancer.server.port=8080"
+      - "traefik.docker.network=frontend"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost:8080/api/config"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # resources:
+    #   limits:
+    #     memory: 2G
+    #     cpus: '2'
+    #   reservations:
+    #     memory: 1G
+    #     cpus: '1'
+
+
+volumes:
+  # Your existing volumes
+  
+  # YouTrack volumes
+  youtrack-data:
+    driver: local
+  youtrack-conf:
+    driver: local
+  youtrack-logs:
+    driver: local
+  youtrack-backups:
+    driver: local
+  youtrack-postgres-data:
+    driver: local

@@ -1,0 +1,43 @@
+  # --- Open WebUI for Ollama ---
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:${OLLAMA_WEBUI_DOCKER_TAG:-main}
+    container_name: home-lab-${OLLAMA_WEBUI_CONTAINER_NAME:-ollama-webui}
+    restart: ${OLLAMA_WEBUI_RESTART:-unless-stopped}
+    networks:
+      - backend # Needs to reach Ollama and be reached by Traefik
+    volumes:
+      # Mount a volume for persistent Open WebUI data/config
+      - ./openwebui_data:/app/backend/data
+    environment:
+      # CRITICAL: Tell Open WebUI where the Ollama API is. Use the service name.
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - TZ=Etc/UTC
+      # Optional: Enable/disable features
+      # - WEBUI_SECRET_KEY= # Generate a secure random key for production
+      # - WEBUI_TELEMETRY=false # Disable telemetry if desired
+    depends_on:
+      # Wait for Ollama to be started (though not necessarily healthy yet)
+      # Use healthcheck condition for stricter startup order if needed
+      ollama:
+        condition: service_started
+      # Optional: Wait for Traefik if experiencing race conditions on first start
+      # traefik:
+      #   condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      # Router definition
+      - "traefik.http.routers.webui-http.entrypoints=web"
+      - "traefik.http.routers.webui-http.rule=Host(`webui.local`)"
+      - "traefik.http.routers.webui-http.service=webui-service"
+      # Service definition (Open WebUI default port inside container is 8080)
+      # Note: This is the *internal* port, no conflict with Traefik host port mapping
+      - "traefik.http.services.webui-service.loadbalancer.server.port=8080"
+      # Network definition
+      - "traefik.docker.network=backend"
+    # healthcheck:
+    #   # Check if the WebUI is responding on its internal port 8080
+    #   test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8080"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 45s

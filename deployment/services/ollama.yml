@@ -1,0 +1,50 @@
+  # --- Ollama LLM Server ---
+  ollama:
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG:-latest}
+    container_name: home-lab-${OLLAMA_CONTAINER_NAME:-ollama}
+    restart: ${OLLAMA_RESTART:-unless-stopped}
+    hostname: "ollama"
+    networks:
+      # Only needs backend access for Open WebUI (and potentially n8n) to connect
+      - backend
+    volumes:
+      # Mount a volume for persistent Ollama models
+      - ./ollama_data:/root/.ollama
+      - /etc/localtime:/etc/localtime:ro # Optional: Mount host's localtime for consistent timestamps
+      - /etc/timezone:/etc/timezone:ro
+    environment:  
+      # Set timezone, adjust as needed
+      - TZ=Etc/UTC
+      # Optional: Set Ollama's default model (e.g., "llama2")
+      # - OLLAMA_DEFAULT_MODEL=llama2
+      # Optional: Set Ollama's default port (default is 11434)
+      # - OLLAMA_PORT=11434 
+    # --- GPU Acceleration (Optional - Uncomment and configure ONE block if needed) ---
+    # Ensure you have the correct drivers and Docker runtime installed on the host.
+    # == NVIDIA ==
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1 # or 'all'
+              capabilities: [gpu]
+    # == AMD (Experimental - may require different base image or drivers) ==
+    # devices:
+    #   - /dev/kfd:/dev/kfd
+    #   - /dev/dri:/dev/dri
+    # security_opt:
+    #   - seccomp:unconfined
+    # group_add:
+    #   - video
+    # --- End GPU ---
+    labels:
+      # Ollama is an API, not exposing directly via Traefik usually
+      - "traefik.enable=false"
+    # healthcheck:
+    #   # Check if the API is responding on its default port 11434
+    #   test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:11434"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 45s # Give it time to start, especially if loading models

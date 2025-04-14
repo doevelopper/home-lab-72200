@@ -1,0 +1,37 @@
+  # --- n8n Workflow Automation ---
+  n8n:
+    # Use the official n8n image
+    image: n8nio/n8n:${N8N_DOCKER_TAG:-latest}
+    container_name: home-lab-${N8N_CONTAINER_NAME:-n8n}
+    restart: ${N8N_RESTART:-unless-stopped}
+    networks:
+      - backend # Needs to be reached by Traefik
+    volumes:
+      # Mount a volume for persistent n8n data (workflows, credentials, etc.)
+      - ./n8n_data:/home/node/.n8n
+    environment:
+      # Set timezone, adjust as needed
+      - TZ=Etc/UTC
+      # Other n8n config via ENV variables can go here (e.g., database, execution settings)
+      - N8N_SECURE_COOKIE=false # Optional: Set to true for secure cookies
+      # Basic auth
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-user}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-password}
+    labels:
+      - "traefik.enable=true"
+      # Router definition
+      - "traefik.http.routers.n8n-http.entrypoints=web"
+      - "traefik.http.routers.n8n-http.rule=Host(`n8n.local`)"
+      - "traefik.http.routers.n8n-http.service=n8n-service"
+      # Service definition (n8n default port is 5678)
+      - "traefik.http.services.n8n-service.loadbalancer.server.port=5678"
+      # Network definition
+      - "traefik.docker.network=backend"
+    # healthcheck: ### NOT WORKING WHEN ENABLED
+    #   # n8n has a healthcheck endpoint
+    #   test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:5678/healthz"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 55s
