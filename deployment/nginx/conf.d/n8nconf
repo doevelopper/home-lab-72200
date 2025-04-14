@@ -1,0 +1,85 @@
+# n8n reverse proxy configuration
+# This should be placed at ./nginx/conf.d/n8n.conf
+
+# HTTP server block - redirects to HTTPS
+server {
+    listen 80;
+    server_name n8n.local;
+
+    # Log settings
+    access_log /var/log/nginx/n8n.access.log main;
+    error_log /var/log/nginx/n8n.error.log warn;
+
+    # Redirect all HTTP traffic to HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS server block
+server {
+    listen 443 ssl;
+    server_name n8n.local;
+
+    # SSL certificates
+    ssl_certificate /etc/nginx/certs/n8n.crt;
+    ssl_certificate_key /etc/nginx/certs/n8n.key;
+
+    # Log settings
+    access_log /var/log/nginx/n8n.access.log main;
+    error_log /var/log/nginx/n8n.error.log warn;
+
+    # Security headers
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Referrer-Policy no-referrer-when-downgrade;
+    
+    # Set buffer size for large request headers
+    proxy_buffer_size 128k;
+    proxy_buffers 4 256k;
+    proxy_busy_buffers_size 256k;
+    
+    # Increase max upload size for file uploads in workflows
+    client_max_body_size 100M;
+    
+    # Main proxy configuration
+    location / {
+        proxy_pass http://n8n:5678;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support for real-time workflow execution
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Extended timeouts for long-running workflows
+        proxy_read_timeout 600s;
+        proxy_connect_timeout 90s;
+        proxy_send_timeout 600s;
+    }
+    
+    # Webhook endpoints with different timeout settings
+    location /webhook/ {
+        proxy_pass http://n8n:5678/webhook/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Shorter timeout for webhook processing
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 60s;
+    }
+    
+    # Health check endpoint
+    location /healthz {
+        proxy_pass http://n8n:5678/healthz;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+}

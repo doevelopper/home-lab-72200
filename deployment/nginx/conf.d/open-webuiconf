@@ -1,0 +1,76 @@
+# Open WebUI reverse proxy configuration
+# This should be placed at ./nginx/conf.d/open-webui.conf
+
+# HTTP server block - redirects to HTTPS
+server {
+    listen 80;
+    server_name chat.local;
+
+    # Log settings
+    access_log /var/log/nginx/open-webui.access.log main;
+    error_log /var/log/nginx/open-webui.error.log warn;
+
+    # Redirect all HTTP traffic to HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS server block
+server {
+    listen 443 ssl;
+    server_name chat.local;
+
+    # SSL certificates
+    ssl_certificate /etc/nginx/certs/open-webui.crt;
+    ssl_certificate_key /etc/nginx/certs/open-webui.key;
+
+    # Log settings
+    access_log /var/log/nginx/open-webui.access.log main;
+    error_log /var/log/nginx/open-webui.error.log warn;
+
+    # Security headers
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Referrer-Policy no-referrer-when-downgrade;
+    
+    # Frontend Proxy
+    location / {
+        proxy_pass http://open-webui:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Extended timeouts for long-running operations
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 120s;
+    }
+    
+    # API endpoints with different timeout
+    location /api/ {
+        proxy_pass http://open-webui:8080/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Extended timeout for model inference
+        proxy_read_timeout 600s;
+        proxy_connect_timeout 120s;
+    }
+    
+    # Health check endpoint
+    location /health {
+        proxy_pass http://open-webui:8080/health;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+}
