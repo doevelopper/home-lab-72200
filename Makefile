@@ -6,14 +6,17 @@ help: ## Display this help.
 
 ##@ Docker
 
-start: ## Start  docker-compose.yml
+start: ## Start everything with the updated configuration
 	$(DC) up -d --force-recreate --remove-orphans
 
-stop: ## Stop docker-compose.yml
+stop: ## Stop your current containers
 	$(DC) docker compose down  --remove-orphans
 
 start-with-ollama: ## Start open-webui with ollama container docker-compose.ollama.yml
 	$(DC) -f docker-compose.ollama.yml up -d
 
-stop-with-ollama: ## Stop open-webui with ollama container docker-compose.ollama.yml
+stop-with-ollama: ## Stop container docker-compose.yml
 	$(DC) -f docker-compose.ollama.yml stop
+
+check-the-logs: ## Check the logs to verify everything is starting correctly
+	$(DC) -f docker-compose logs -f	
