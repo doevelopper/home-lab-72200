@@ -28,9 +28,9 @@ networks:
 
 services:
   # --- DNS Server ---
-  dns:
+  dnsmasq:
     image: jpillora/dnsmasq
-    container_name: dns-${DNS_CONTAINER_NAME:-aistack}
+    container_name: dnsmasq-${DNS_CONTAINER_NAME:-aistack}
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
@@ -39,7 +39,7 @@ services:
     ports:
       - "5053:53/udp"
     volumes:
-      - ./deployment/dnsmasq/dnsmasq.conf:/etc/dnsmasq.conf
+      - ${DOCKER_DEPLOYMENT_PATH}/dnsmasq/dnsmasq.conf:/etc/dnsmasq.conf
     networks:
       homelab-network:
         ipv4_address: 192.168.10.2
@@ -55,12 +55,23 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+  pihole:
+    container_name: pihole-${DNS_CONTAINER_NAME:-aistack}
+    image: pihole/pihole:latest
+    environment:
+      TZ: 'Europe/Paris'
+      WEBPASSWORD: 'your_password'
+    volumes:
+      - ./volumes/pihole:/etc/pihole
+      - ${DOCKER_DEPLOYMENT_PATH}/dnsmasq:/etc/dnsmasq.d
+    restart: unless-stopped
 
   traefik:
     image: "traefik:v3.3.5"
     container_name: traefik-${TRAEFIK_CONTAINER_NAME:-aistack}
     depends_on:
-      - dns
+      - dnsmasq
+      - pihole
     dns:
       - 192.168.10.2
     environment:
@@ -78,6 +89,7 @@ services:
       - "8080:8080"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - ${DOCKER_DEPLOYMENT_PATH}/traefik:/etc/traefik
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.entrypoints=web"
@@ -101,7 +113,7 @@ services:
     container_name: whoami-${WHOAMI_CONTAINER_NAME:-aistack}
     restart: unless-stopped
     depends_on:
-      - dns
+      - dnsmasq
     dns:
       - 192.168.10.2
     networks:
@@ -126,7 +138,7 @@ services:
     container_name: portainer-${PORTAINER_CONTAINER_NAME:-aistack}
     restart: unless-stopped
     depends_on:
-      - dns
+      - dnsmasq
     dns:
       - 192.168.10.2
     networks:
@@ -138,7 +150,7 @@ services:
       - "9000:9000"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
-      - "./morphale/portainer/data:/data"
+      - "${DOCKER_VOLUMES_PATH}/portainer/data:/data"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.portainer-http.entrypoints=web"
@@ -158,7 +170,7 @@ services:
     container_name: nginx-${NGINX_CONTAINER_NAME:-aistack}
     restart: unless-stopped
     depends_on:
-      - dns
+      - dnsmasq
     dns:
       - 192.168.10.2
     networks:
@@ -167,13 +179,16 @@ services:
       - monitoring-network
       - homelab-network
     ports:
-      - "8081:80"
+      - "${NGINX_PORT:-8443}:443"
+      - "${NGINX_HTTP_PORT:-8081}:80"
     volumes:
-      - ./deployment/nginx:/etc/nginx
+      - ${DOCKER_DEPLOYMENT_PATH}/nginx:/etc/nginx
+      - ${DOCKER_DEPLOYMENT_PATH}/nginx/logs:/var/log/nginx
       # - ./deployment/nginx/conf.d:/etc/nginx/conf.d
       # - "/home/hroland/developpements/homelab/home-lab-72200/deployment/nginx/conf.d:/etc/nginx/conf.d"
       # Add a health-check file for Nginx
       # - ./nginx-health-check.conf:/etc/nginx/conf.d/health-check.conf
+      # - ./volumes/nginx/html:/usr/share/nginx/html
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.nginx-http.entrypoints=web"
@@ -187,6 +202,13 @@ services:
     #   timeout: 10s
     #   retries: 3
     #   start_period: 10s
+    # healthcheck:
+    #   test: ["CMD", "nginx", "-t"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 30s
+
 
   # --- Watchtower - Automatic Updates ---
   watchtower:
@@ -194,7 +216,7 @@ services:
     container_name: watchtower-${WATCHTOWER_CONTAINER_NAME:-aistack}
     restart: unless-stopped
     depends_on:
-      - dns
+      - dnsmasq
     dns:
       - 192.168.10.2
     networks:
@@ -203,7 +225,7 @@ services:
       - homelab-network
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
-    command: --interval 3600 --cleanup --include-stopped #--include-volumes
+    command: --interval 3600 --cleanup --include-stopped #--include-volumes -http-api-metrics --http-api-token ${WATCHTOWER_SECRET_KEY} open-webui ollama
     environment:
       - WATCHTOWER_DEBUG=true
     labels:
@@ -221,7 +243,7 @@ services:
     container_name: youtrack-postgres-${YOUTRACK_CONTAINER_NAME:-aistack}
     restart: unless-stopped
     depends_on:
-      - dns
+      - dnsmasq
     dns:
       - 192.168.10.2
     environment:
@@ -229,7 +251,7 @@ services:
       POSTGRES_PASSWORD: youtrack
       POSTGRES_DB: youtrack
     volumes:
-      - youtrack-postgres-data:/var/lib/postgresql/data
+      - ${DOCKER_VOLUMES_PATH}/youtrack/postgres/data:/var/lib/postgresql/data
     networks:
       - backend-network
     healthcheck:
@@ -245,7 +267,7 @@ services:
     restart: unless-stopped
     depends_on:
       - youtrack-postgres
-      - dns
+      - dnsmasq
     dns:
       - 192.168.10.2
     environment:
@@ -255,10 +277,10 @@ services:
       # Add base URL for proper proxy configuration
       YOUTRACK_BASEURL: http://youtrack.docker.local
     volumes:
-      - youtrack-data:/opt/youtrack/data
-      - youtrack-conf:/opt/youtrack/conf
-      - youtrack-logs:/opt/youtrack/logs
-      - youtrack-backups:/opt/youtrack/backups
+      - ${DOCKER_VOLUMES_PATH}/youtrack/data:/opt/youtrack/data
+      - ${DOCKER_VOLUMES_PATH}/youtrack/conf:/opt/youtrack/conf
+      - ${DOCKER_VOLUMES_PATH}/youtrack/logs:/opt/youtrack/logs
+      - ${DOCKER_VOLUMES_PATH}/youtrack/backups:/opt/youtrack/backups
     networks:
       - frontend-network
       - backend-network
@@ -284,16 +306,29 @@ services:
 
 
 volumes:
-  # Your existing volumes
-  
+  ollama:
+    name: ${DOCKER_VOLUMES_PATH}/ollama
+  embedding-inference:
+    name: ${DOCKER_VOLUMES_PATH}/embedding-inference
+  open-webui:
+    name: ${DOCKER_VOLUMES_PATH}/open-webui
+  automatic1111:
+    name: ${DOCKER_VOLUMES_PATH}/automatic1111
   # YouTrack volumes
-  youtrack-data:
-    driver: local
-  youtrack-conf:
-    driver: local
-  youtrack-logs:
-    driver: local
-  youtrack-backups:
-    driver: local
-  youtrack-postgres-data:
-    driver: local
+  youtrack:
+    name: ${DOCKER_VOLUMES_PATH}/youtrack
+
+# volumes:
+#   # Your existing volumes
+  
+#   # YouTrack volumes
+#   youtrack-data:
+#     driver: local
+#   youtrack-conf:
+#     driver: local
+#   youtrack-logs:
+#     driver: local
+#   youtrack-backups:
+#     driver: local
+#   youtrack-postgres-data:
+#     driver: local

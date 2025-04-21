@@ -1,0 +1,76 @@
+// For format details, see https://aka.ms/vscode-remote/devcontainer.json
+{
+  "name": "C++ DevBox",
+  "build": {
+    // The repository contains two images:
+    // - "./debian/bookworm/Dockerfile" (default)
+    // - "./debian/trixie/Dockerfile"
+    "dockerfile": "./debian/trixie/Dockerfile",
+    // sets the run context to this .devcontainer folder
+    "context": "."//,
+    // target a specific build stage for testing
+    //"target": "some-builder"
+  },
+  "capAdd": [
+    "SYS_PTRACE"
+  ],
+  "securityOpt": [
+    "seccomp=unconfined"
+  ],
+  // config settings you would have in ".vscode/settings.json"
+  "customizations": {
+    "vscode": {
+      // Add the IDs of extensions you want installed when the container is created.
+      "extensions": [
+        // EditorConfig
+        "EditorConfig.EditorConfig",
+        // Git + Github
+        "GitHub.vscode-pull-request-github",
+        // C++
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "ms-vscode.cpptools-themes",
+        // CMake
+        "ms-vscode.cmake-tools",
+        "twxs.cmake",
+        // Testing
+        "matepek.vscode-catch2-test-adapter",
+        "ms-vscode.test-adapter-converter",
+        "hbenl.vscode-test-explorer",
+        // LLVM
+        "vadimcn.vscode-lldb",
+        // Spell checking
+        "streetsidesoftware.vscode-spell-checker",
+        // Some additional extensions
+        "Gruntfuggly.todo-tree",
+        "aaron-bond.better-comments",
+        "adam-bender.commit-message-editor",
+        "mhutchie.git-graph"
+      ],
+      "settings": {
+        "extensions.ignoreRecommendations": true,
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.shell.linux": "/bin/zsh",
+        // tell VSCode that you want the shell to be a login, interactive shell
+        "terminal.integrated.shellArgs.linux": [
+          "-l",
+          "-i"
+        ],
+        // LLVM
+        "clangd.path": "clangd",
+        "clang-format.executable": "clang-format",
+        "cmake.cmakePath": "cmake",
+        "cmake.ctestPath": "ctest",
+        "cmake.generator": "Ninja",
+        "cmake.configureOnOpen": true,
+        "lldb.executable": "/usr/bin/lldb",
+        // Spellchecker
+        "cSpell.enabled": true
+      }
+    }
+  },
+  // Use 'postCreateCommand' to run commands after the container is created.
+  "postCreateCommand": "./.devcontainer/scripts/entrypoint.sh",
+  // Set `remoteUser` to `root` to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
+  "remoteUser": "root"
+}

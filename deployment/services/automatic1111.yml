@@ -1,0 +1,16 @@
+  automatic1111:
+    image: goolashe/automatic1111-sd-webui:latest
+    restart: always
+    environment: 
+      USE_XFORMERS: "true"
+      CLI_ARGS: "--api --ckpt-dir /automatic1111_data/checkpoints --hypernetwork-dir /automatic1111_data/hypernetworks --embeddings-dir /automatic1111_data/embeddings --lora-dir /automatic1111_data/loras"
+      CUDA_VISIBLE_DEVICES: "1"
+    volumes:
+      - "./deployment/ollama/automatic1111_data:/automatic1111_data"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]

@@ -1,7 +1,10 @@
 docker compose up -d --force-recreate --remove-orphans
 docker compose down  --remove-orphans
 
-
+#!/bin/bash
+mkdir -p ollama-prod/{nginx,scripts,config,certs,backups,docs}
+mkdir -p ollama-prod/nginx/{conf.d,templates}
+mkdir -p ollama-prod/docs/{deployment,security,monitoring} 
 
 # Generate a private key
 openssl genrsa -out ${1}.key 2048

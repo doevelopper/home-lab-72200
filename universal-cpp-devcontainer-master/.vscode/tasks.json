@@ -1,0 +1,61 @@
+{
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "C/C++: g++ build active file",
+            "command": "/usr/bin/g++",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-Wall",
+                "-O0",
+                "-g",
+                "${fileDirname}/*.cpp",
+                "-o",
+                "${workspaceFolder}/build/${fileBasenameNoExtension}.out",
+                "-I",
+                "${workspaceFolder}/**/include"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Use g++ to build all currently opened dir's cpp files"
+        }
+        
+        ,{
+            "type": "cppbuild",
+            "label": "C/C++: clang++ build active file",
+            "command": "/usr/bin/clang++",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-fansi-escape-codes",
+                "-Wall",
+                "-O0",
+                "-g",
+                "${fileDirname}/*.cpp",
+                "-o",
+                "${workspaceFolder}/build/${fileBasenameNoExtension}.out",
+                "-I",
+                "${workspaceFolder}/**/include"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "Use clang++ to build all currently opened dir's cpp files"
+        }
+    ],
+    "version": "2.0.0"
+}

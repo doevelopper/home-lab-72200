@@ -1,0 +1,49 @@
+{
+	"name": "${localWorkspaceFolder}-devcontainer",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": "../",
+		"target": "non-root" //Use this on rootless Docker environments
+		// "target": "root" //Use this on rootful Docker environments
+	},
+	// Configure tool-specific properties.
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools-extension-pack",
+				"cschlosser.doxdocgen",
+				"xaver.clang-format"
+			]
+		}
+	},
+	"mounts": [
+		// default ssh keys and configs folder
+		{
+			"source": "${localEnv:HOME}/.ssh/",
+			"target": "/mnt/.ssh/",
+			"type": "bind"
+		}
+		// system gitconfig
+		// ,{
+		// 	"source": "/etc/gitconfig",
+		// 	"target": "/etc/gitconfig",
+		// 	"type": "bind"
+		// }
+		// user gitconfig
+		,
+		{
+			"source": "${localEnv:HOME}/.gitconfig",
+			"target": "/mnt/.gitconfig",
+			"type": "bind"
+		}
+		// global gitignore
+		// ,{
+		// 	"source": "${localEnv:HOME}/.gitignore",
+		// 	"target": "/mnt/.gitignore",
+		// 	"type": "bind"
+		// }
+	],
+	"workspaceMount": "source=${localWorkspaceFolder}/,target=/mnt/workspace/,type=bind",
+	"workspaceFolder": "/mnt/workspace",
+	"onCreateCommand": "/mnt/workspace/scripts/container/symlink_mounts.sh"
+}

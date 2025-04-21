@@ -1,0 +1,25 @@
+#
+# Excludes files and folders from the Docker context
+#
+# Docs: https://docs.docker.com/engine/reference/builder/#dockerignore-file
+#
+
+# Folders
+.devcontainer/
+.git/
+.github/
+.vscode/
+assets/
+build-tools/
+devbox-test/
+
+# Files
+.dockleignore
+.editorconfig
+.gitattributes
+.gitignore
+.hadolint.yml
+CHANGELOG.md
+cspell.json
+LICENSE
+README.md

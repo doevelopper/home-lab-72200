@@ -1,0 +1,291 @@
+#
+# SPDX-FileCopyrightText: 2023-2025 Jens A. Koch
+# SPDX-License-Identifier: MIT
+#
+# This file is part of https://github.com/jakoch/cpp-devbox
+#
+
+name: Release
+
+on:
+  # You can manually run this workflow.
+  workflow_dispatch:
+  # This workflow runs on pushing a semantic versioned tag (e.g. v1.0.0).
+  # This workflow does not run when pushing to the main branch.
+  push:
+    #branches:
+    #  - main
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  # This workflow runs on schedule: every Sunday at 1 am.
+  schedule:
+    - cron: "0 1 * * 0"
+
+env:
+  DOCKERHUB_IMAGE: ${{ github.repository }}
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+
+# ---------------------------------------------------------------------------------------
+
+  build:
+
+# ---------------------------------------------------------------------------------------
+
+    name: "Build Container"
+    # https://github.com/actions/runner-images
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+      security-events: write # required for trivy-action
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { platform: "linux/amd64", debian_codename: "bookworm", debian_version: "12"}
+          - { platform: "linux/amd64", debian_codename: "trixie", debian_version: "13" }
+
+    steps:
+      - name: ✂️ Free Disk Space
+        uses: jlumbroso/free-disk-space@v1.3.1 # https://github.com/jlumbroso/free-disk-space
+        with:
+          tool-cache: true
+          docker-images: false
+
+      - name: 🤘 Checkout Code
+        uses: actions/checkout@v4 # https://github.com/actions/checkout
+
+      - name: 🔍 Run hadolint
+        uses: hadolint/hadolint-action@v3.1.0 # https://github.com/hadolint/hadolint-action
+        with:
+          dockerfile: .devcontainer/debian/${{ matrix.config.debian_codename }}/Dockerfile
+          no-fail: true
+
+      - name: 🔒 Login to DockerHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3 # https://github.com/docker/login-action
+        with:
+          username: ${{ github.actor }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 🔒 Login to Github Container Registry (GHCR)
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3 # https://github.com/docker/login-action
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔽 Setup QEMU
+        uses: docker/setup-qemu-action@v3 # https://github.com/docker/setup-qemu-action
+        with:
+          platforms: ${{ matrix.config.platform }}
+
+      - name: 🔽 Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3 # https://github.com/docker/setup-buildx-action
+
+      # cpp-devbox:{debian_codename}-{{date}}                # only on scheduled builds
+      # cpp-devbox:{debian_codename}-{{version}}             # only on git tag
+      # cpp-devbox:{debian_codename}-{{major}}.{{minor}}     # only on git tag
+      # cpp-devbox:{debian_codename}-{{date}}-sha-{{sha}}    # only on push, not when tagging
+      # cpp-devbox:{debian_codename}-latest                  # always
+      - name: ✏ Setup Docker Metadata ➔ Stage cpp-devbox-base
+        id: metadata-base
+        uses: docker/metadata-action@v5 # https://github.com/docker/metadata-action
+        with:
+          images: |
+            ${{ env.GHCR_IMAGE }}
+            ${{ env.DOCKERHUB_IMAGE }}
+          flavor: |
+            latest=auto
+            prefix=${{ matrix.config.debian_codename }}-
+          tags: |
+            type=schedule,pattern={{ date 'YYYYMMDD' }}
+            type=semver,pattern={{ version }}
+            type=semver,pattern={{ major }}.{{ minor }}
+            type=raw,value={{ date 'YYYYMMDD' }}-sha-{{ sha }},enabled=${{ github.event_name == 'push' }}
+            type=raw,value=latest
+
+      # cpp-devbox:{debian_codename}-with-vulkansdk-{{date}}                # only on scheduled builds
+      # cpp-devbox:{debian_codename}-with-vulkansdk-{{version}}             # only on git tag
+      # cpp-devbox:{debian_codename}-with-vulkansdk-{{major}}.{{minor}}     # only on git tag
+      # cpp-devbox:{debian_codename}-with-vulkansdk-{{date}}-sha-{{sha}}    # only on push, not when tagging
+      # cpp-devbox:{debian_codename}-with-vulkansdk-latest                  # always
+      - name: ✏ Setup Docker Metadata ➔ Stage cpp-devbox-base-with-vulkansdk
+        id: metadata-base-with-vulkansdk
+        uses: docker/metadata-action@v5 # https://github.com/docker/metadata-action
+        with:
+          images: |
+            ${{ env.GHCR_IMAGE }}
+            ${{ env.DOCKERHUB_IMAGE }}
+          flavor: |
+            latest=auto
+            prefix=${{ matrix.config.debian_codename }}-with-vulkansdk-
+          tags: |
+            type=schedule,pattern={{ date 'YYYYMMDD' }}
+            type=semver,pattern={{ version }}
+            type=semver,pattern={{ major }}.{{ minor }}
+            type=raw,value={{ date 'YYYYMMDD' }}-sha-{{ sha }},enabled=${{ github.event_name == 'push' }}
+            type=raw,value=latest
+
+      - name: ✏ Create info.json
+        run: |
+          jq -n --arg version "${{ github.ref_name }}" \
+                --arg commit "${{ github.sha }}" \
+                --arg date "$(date -u +%F)" \
+                '{ version: $version, commit: $commit, date: $date }' > info-${{ matrix.config.debian_codename }}.json
+
+      - name: Check show-tool-versions.sh and make executable
+        run: |
+          ls -l ${{ github.workspace }}/.devcontainer/scripts/show-tool-versions.sh
+          chmod +x ${{ github.workspace }}/.devcontainer/scripts/show-tool-versions.sh
+
+      # Build Image -> Stage: cpp-devbox-base
+      - name: 📦 🚀 Build Image ➔ Stage cpp-devbox-base
+        id: build-base
+        uses: docker/build-push-action@v6 # https://github.com/docker/build-push-action
+        with:
+          context: .
+          file: .devcontainer/debian/${{ matrix.config.debian_codename }}/Dockerfile
+          target: cpp-devbox-base
+          platforms: ${{ matrix.config.platform }}
+          tags: ${{ steps.metadata-base.outputs.tags }}
+          labels: ${{ steps.metadata-base.outputs.labels }}
+          push: false
+          load: true
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ matrix.config.debian_codename }}-latest-cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:${{ matrix.config.debian_codename }}-latest-cache,mode=max
+
+      # Build Image -> Stages: cpp-devbox-base + cpp-devbox-with-vulkansdk = with-vulkansdk
+      - name: 📦 🚀 Build Image ➔ Stage cpp-devbox-with-vulkansdk
+        id: build-base-with-vulkansdk
+        uses: docker/build-push-action@v6 # https://github.com/docker/build-push-action
+        with:
+          context: .
+          file: .devcontainer/debian/${{ matrix.config.debian_codename }}/Dockerfile
+          target: cpp-devbox-with-vulkansdk
+          platforms: ${{ matrix.config.platform }}
+          tags: ${{ steps.metadata-base-with-vulkansdk.outputs.tags }}
+          labels: ${{ steps.metadata-base-with-vulkansdk.outputs.labels }}
+          push: false
+          load: true
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ matrix.config.debian_codename }}-with-vulkansdk-latest-cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:${{ matrix.config.debian_codename }}-with-vulkansdk-latest-cache,mode=max
+
+      # This provides: ${{ steps.get_image_name_base.outputs.name }}
+      - name: Get image name for base
+        id: get_image_name_base
+        run: |
+          name=$(echo '${{ steps.build-base.outputs.metadata }}' | jq -r '."image.name" | split(",") | .[0]')
+          echo "name=$name" >> $GITHUB_OUTPUT
+
+      # This provides: ${{ steps.get_image_name_base_with_vulkan.outputs.name }}
+      - name: Get image name for base with vulkan
+        id: get_image_name_base_with_vulkan
+        run: |
+          name=$(echo '${{ steps.build-base-with-vulkansdk.outputs.metadata }}' | jq -r '."image.name" | split(",") | .[0]')
+          echo "name=$name" >> $GITHUB_OUTPUT
+
+      - name: ℹ️ Run cpp-devbox Container to grab version info
+        id: run-container-base
+        run: |
+          README="README-${{ matrix.config.debian_codename }}-base.md"
+          VERSIONS="versions-${{ matrix.config.debian_codename }}-base.md"
+          echo "# cpp-devbox ${{ github.ref_name }} ($(date '+%Y-%m-%d'))" >> $README
+          echo -e "\n" >> $README
+          echo "OS Version:  Debian ${{ matrix.config.debian_version }} ${{ matrix.config.debian_codename }}" >> $README
+          echo "Image Version: ${{ steps.get_image_name_base.outputs.name }}" >> $README
+          echo -e "\n" >> $README
+          docker run --rm -v ${{ github.workspace }}/.devcontainer/scripts:/workspace ${{ steps.get_image_name_base.outputs.name }} /bin/zsh -c "cat /etc/os-release; pwd; ls -l /workspace"
+          docker run --rm -v ${{ github.workspace }}/.devcontainer/scripts:/workspace ${{ steps.get_image_name_base.outputs.name }} /bin/zsh -c "/workspace/show-tool-versions.sh" > $VERSIONS
+          cat $VERSIONS >> $README
+
+      - name: ℹ️ Run cpp-devbox-with-vulkansdk Container to grab version info
+        id: run-container-with-vulkan
+        run: |
+          README="README-${{ matrix.config.debian_codename }}-with-vulkansdk.md"
+          VERSIONS="versions-${{ matrix.config.debian_codename }}-with-vulkan.md"
+          echo "# cpp-devbox ${{ github.ref_name }} ($(date '+%Y-%m-%d'))" >> $README
+          echo -e "\n" >> $README
+          echo "OS Version:  Debian ${{ matrix.config.debian_version }} ${{ matrix.config.debian_codename }} with Vulkan SDK" >> $README
+          echo "Image Version: ${{ steps.get_image_name_base_with_vulkan.outputs.name }}" >> $README
+          echo -e "\n" >> $README
+          docker run --rm -v ${{ github.workspace }}/.devcontainer/scripts:/workspace ${{ steps.get_image_name_base_with_vulkan.outputs.name }} /bin/zsh -c "cat /etc/os-release; pwd; ls -l /workspace"
+          docker run --rm -v ${{ github.workspace }}/.devcontainer/scripts:/workspace ${{ steps.get_image_name_base_with_vulkan.outputs.name }} /bin/zsh -c "/workspace/show-tool-versions.sh" > $VERSIONS
+          cat $VERSIONS >> $README
+
+      - name: Push all images and all tags
+        run: |
+          docker push --all-tags ${{ env.GHCR_IMAGE }}
+          docker push --all-tags ${{ env.DOCKERHUB_IMAGE }}
+
+      - name: List Docker Images
+        run: |
+          docker images --format "table {{.ID}}\t{{.Repository}}\t{{.Tag}}\t{{.Size}}"
+          docker images --digests
+
+      - name: Test Docker Image
+        run: |
+          docker run --rm -v "${PWD}/devbox-test:/src" -w /src ghcr.io/jakoch/cpp-devbox:trixie-latest zsh -c "./build.sh"
+
+      - name: 📦 Provide the version info and info.json as a release asset
+        uses: actions/upload-artifact@v4 # https://github.com/actions/upload-artifact
+        with:
+          name: version-info-${{ matrix.config.debian_codename }}
+          path: |
+            info-${{ matrix.config.debian_codename }}.json
+            versions-${{ matrix.config.debian_codename }}-base.md
+            versions-${{ matrix.config.debian_codename }}-with-vulkan.md
+            README-${{ matrix.config.debian_codename }}-base.md
+            README-${{ matrix.config.debian_codename }}-with-vulkansdk.md
+
+      - name: 🛡️🔍 Scan Image for Vulnerabilities using Trivy
+        uses: aquasecurity/trivy-action@master # https://github.com/aquasecurity/trivy-action
+        with:
+          image-ref: '${{ env.GHCR_IMAGE }}:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          skip-files: /etc/ssh/ssh_host_rsa_key
+          skip-dirs: gcc-13.2.0,usr/lib64
+      # Notes for the skips:
+      # - skip-files: /etc/ssh/ssh_host_rsa_key
+      #   The file is skipped, because its reported as "Asymmetric Private Key" alert.
+      #   This is a false positive, because the file is a private key, which is intended to be there.
+      # - skip-dirs: gcc-13.2.0,usr/lib64
+      #   The folders are skipped, because the folders contain many files, which
+      #   are not relevant for the image security. The scan is faster without them.
+
+      - name: 🛡️🔼 Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3 # https://github.com/github/codeql-action
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: 🛡️🔍 Scan Image for Vulnerabilities using Dockle
+        if: always()
+        uses: goodwithtech/dockle-action@v0.4.15 # https://github.com/goodwithtech/dockle-action
+        with:
+          image: '${{ env.GHCR_IMAGE }}:latest'
+          format: 'list'
+          exit-code: '0'
+          exit-level: 'warn'
+
+      # - name: 🛡️🔍 Scan Image for Vulnerabilities using Docker Scout
+      #   uses: docker/scout-action@v1 # https://github.com/docker/scout-action
+      #   with:
+      #     command: cves,recommendations
+      #     only-severities: critical,high
+      #     image: ${{ steps.metadata-base.outputs.tags }}
+      #     format: 'json'
+      #     sarif-file: 'scout-results.sarif.json'
+      #     summary: true
+
+      # - name: 🛡️🔼 Upload Docker Scout scan results to GitHub Security tab
+      #   uses: github/codeql-action/upload-sarif@v3 # https://github.com/github/codeql-action
+      #   with:
+      #     sarif_file: 'scout-results.sarif.json'

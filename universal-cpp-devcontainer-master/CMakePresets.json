@@ -1,0 +1,89 @@
+{
+    "version": 4,
+    "configurePresets": [
+        {
+            "name": "base",
+            "description": "Parent config",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_CXX_STANDARD": "17",
+                "CMAKE_CXX_STANDARD_REQUIRED": "YES",
+                "CMAKE_CXX_FLAGS_DEBUG": "-ggdb3 -O0",
+                "CMAKE_CXX_FLAGS_RELEASE": "-DNDEBUG -O3",
+                "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        }
+        ,{
+            "name": "ninja",
+            "description": "Parent config with ninja generator",
+            "hidden": true,
+            "inherits": "base",
+            "generator": "Ninja"
+        }
+        ,{
+            "name": "vcpkg",
+            "description": "Parent config with Ninja generator and vcpkg toolchain",
+            "hidden": true,
+            "inherits": "ninja",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        }
+        ,{
+            "name": "debug",
+            "displayName": "Debug",
+            "description": "Debug configuration (default generator)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-Wall -Wextra -pedantic"
+            }
+        }
+        ,{
+            "name": "release",
+            "displayName": "Release",
+            "description": "Release configuration (default generator)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_FLAGS": "-Wall"
+            }
+        }
+        ,{
+            "name": "ninja-debug",
+            "displayName": "Debug (Ninja)",
+            "description": "Debug configuration (Ninja generator)",
+            "inherits": [
+                "ninja",
+                "debug"
+            ]
+        }
+        ,{
+            "name": "ninja-release",
+            "displayName": "Release (Ninja)",
+            "description": "Release configuration (Ninja generator)",
+            "inherits": [
+                "ninja",
+                "release"
+            ]
+        }
+        ,{
+            "name": "vcpkg-debug",
+            "displayName": "Debug (vcpkg)",
+            "description": "Debug configuration (vcpkg toolchain + Ninja generator)",
+            "inherits": [
+                "vcpkg",
+                "debug"
+            ]
+        }
+        ,{
+            "name": "vcpkg-release",
+            "displayName": "Release (vcpkg)",
+            "description": "Release configuration (vcpkg toolchain + Ninja generator)",
+            "inherits": [
+                "vcpkg",
+                "release"
+            ]
+        }
+    ]
+}

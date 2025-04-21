@@ -1,0 +1,3 @@
+*
+!/vcpkg.json
+!/scripts/container/redirect_to_vcpkg.sh

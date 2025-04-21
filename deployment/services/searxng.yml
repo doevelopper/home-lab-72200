@@ -1,0 +1,18 @@
+## webui should be depend on this
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng
+    ports:
+      - "8080:8080"
+    networks:
+      - backend-network
+    labels: 
+      - "traefik.enable=true"
+      - "traefik.http.routers.searxng-http.entrypoints=web"
+      - "traefik.http.routers.searxng-http.rule=Host(`searxng.docker.local`)"
+      - "traefik.http.services.searxng-service.loadbalancer.server.port=8080"
+      - "traefik.http.routers.searxng-http.service=searxng-service"
+      - "traefik.docker.network=backend"
